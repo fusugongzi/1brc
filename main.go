@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,6 +32,16 @@ type computedResult struct {
 }
 
 func main() {
+	f, err := os.Create("./profiles/mem.prof")
+	if err != nil {
+		fmt.Println("can not create mem.prof" + err.Error())
+		return
+	}
+	if err = pprof.WriteHeapProfile(f); err != nil {
+		fmt.Println("WriteHeapProfile error " + err.Error())
+		return
+	}
+
 	start := time.Now().UnixMilli()
 
 	bytesChan := make(chan []byte, 15)
