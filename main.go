@@ -54,37 +54,39 @@ func main() {
 	}
 
 	// 读取文件，写入到bytesChan
+	chunkSize := 64 * 1024 * 1024
+	file, err := os.Open("measurements.txt")
+	if err != nil {
+		panic(err)
+	}
 	go func() {
-		// 打开文件
-		file, err := os.Open("measurements.txt")
-		if err != nil {
-			fmt.Println("打开文件错误:", err)
-			return
-		}
-
-		sendBytes := make([]byte, 0)
-		leaveBytes := make([]byte, 0)
-		// 逐行读取文件
+		buf := make([]byte, chunkSize)
+		leftover := make([]byte, 0, chunkSize)
 		for {
-			readBytes := make([]byte, 64*1024*1024)
-			_, err = file.Read(readBytes)
+			readTotal, err := file.Read(buf)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					break
 				}
 				panic(err)
 			}
-			lastNewLineIdx := bytes.LastIndexByte(readBytes, byte('\n'))
-			sendBytes = append(sendBytes, leaveBytes...)
-			sendBytes = append(sendBytes, readBytes[:lastNewLineIdx+1]...)
-			leaveBytes = make([]byte, len(readBytes[lastNewLineIdx+1:]))
-			copy(leaveBytes, readBytes[lastNewLineIdx+1:])
-			bytesChan <- sendBytes
-		}
+			buf = buf[:readTotal]
 
+			toSend := make([]byte, readTotal)
+			copy(toSend, buf)
+
+			lastNewLineIndex := bytes.LastIndex(buf, []byte{'\n'})
+
+			toSend = append(leftover, buf[:lastNewLineIndex+1]...)
+			leftover = make([]byte, len(buf[lastNewLineIndex+1:]))
+			copy(leftover, buf[lastNewLineIndex+1:])
+
+			bytesChan <- toSend
+
+		}
 		close(bytesChan)
 
-		// 协程处理完数据之后，关闭dataChan
+		// wait for all chunks to be proccessed before closing the result stream
 		wg.Wait()
 		close(dataChan)
 	}()
