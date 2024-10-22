@@ -65,13 +65,13 @@ func main() {
 		}
 
 		// 创建带缓冲的读取器，增大缓冲区大小
-		reader := bufio.NewReaderSize(file, 500*1024*1024) // 16 KB
+		reader := bufio.NewReaderSize(file, 100*1024*1024) // 100 MB
 
 		sendBytes := make([]byte, 0)
 		leaveBytes := make([]byte, 0)
 		// 逐行读取文件
 		for {
-			readBytes := make([]byte, 64*1024*1024)
+			readBytes := make([]byte, 10*1024*1024)
 			_, err = reader.Read(readBytes)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
