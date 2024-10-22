@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -32,15 +33,10 @@ type computedResult struct {
 }
 
 func main() {
-	f, err := os.Create("./profiles/mem.prof")
-	if err != nil {
-		fmt.Println("can not create mem.prof" + err.Error())
-		return
-	}
-	if err = pprof.WriteHeapProfile(f); err != nil {
-		fmt.Println("WriteHeapProfile error " + err.Error())
-		return
-	}
+	go func() {
+		http.HandleFunc("/prof", startProfileHandler)
+		http.ListenAndServe(":9092", nil)
+	}()
 
 	start := time.Now().UnixMilli()
 
@@ -168,4 +164,20 @@ func process(readBytes []byte, dataChan chan map[string]*measurement) {
 		}
 	}
 	dataChan <- m
+}
+
+// startProfileHandler 启动 CPU profiling
+func startProfileHandler(w http.ResponseWriter, r *http.Request) {
+	// 创建 profile 文件
+	f, err := os.Create("mem.prof")
+	if err != nil {
+		return
+	}
+
+	// 启动 CPU profiling
+	if err = pprof.WriteHeapProfile(f); err != nil {
+		return
+	}
+
+	w.Write([]byte("Memory profiling completed, profile saved as mem.prof"))
 }
