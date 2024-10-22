@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -63,15 +62,12 @@ func main() {
 			return
 		}
 
-		// 创建带缓冲的读取器，增大缓冲区大小
-		reader := bufio.NewReaderSize(file, 100*1024*1024) // 100 MB
-
 		sendBytes := make([]byte, 0)
 		leaveBytes := make([]byte, 0)
 		// 逐行读取文件
 		for {
-			readBytes := make([]byte, 10*1024*1024)
-			_, err = reader.Read(readBytes)
+			readBytes := make([]byte, 64*1024*1024)
+			_, err = file.Read(readBytes)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					break
