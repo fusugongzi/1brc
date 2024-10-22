@@ -12,7 +12,6 @@ import (
 	"runtime/pprof"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
@@ -138,31 +137,39 @@ func main() {
 
 func process(readBytes []byte, dataChan chan map[string]*measurement) {
 	m := make(map[string]*measurement)
-	str := string(readBytes)
-	strSlice := strings.Split(str, "\n")
-	for _, v := range strSlice {
-		if v == "" {
-			continue
+	start := 0
+	var city string
+
+	for idx, v := range readBytes {
+		if v == byte(';') {
+			city = string(readBytes[start:idx])
+			start = idx + 1
 		}
-		c := strings.Split(v, ";")[0]
-		measure, _ := strconv.ParseFloat(strings.Split(v, ";")[1], 64)
-		if exist, ok := m[c]; !ok {
-			m[c] = &measurement{
-				min: measure,
-				max: measure,
-				sum: measure,
-				cnt: 1,
+		if v == byte('\n') {
+			if city != "" {
+				measure, _ := strconv.ParseFloat(string(readBytes[start:idx]), 64)
+				if exist, ok := m[city]; !ok {
+					m[city] = &measurement{
+						min: measure,
+						max: measure,
+						sum: measure,
+						cnt: 1,
+					}
+				} else {
+					if measure < exist.min {
+						exist.min = measure
+					} else if measure > exist.max {
+						exist.max = measure
+					}
+					exist.sum = exist.sum + measure
+					exist.cnt++
+				}
+				city = ""
 			}
-		} else {
-			if measure < exist.min {
-				exist.min = measure
-			} else if measure > exist.max {
-				exist.max = measure
-			}
-			exist.sum = exist.sum + measure
-			exist.cnt++
+			start = idx + 1
 		}
 	}
+
 	dataChan <- m
 }
 
