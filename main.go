@@ -46,20 +46,48 @@ func main() {
 	measureChan := make(chan map[string]*measurement, 10)
 	for i := 0; i < runtime.NumCPU()-1; i++ {
 		go func() {
-			for originBytes := range originBytesChan {
-				process(originBytes, measureChan)
+			for readBytes := range originBytesChan {
+				process(readBytes, measureChan)
 			}
 			wg.Done()
 		}()
 	}
 
 	// 读取文件，写入到bytesChan
+	chunkSize := 64 * 1024 * 1024
 	file, err := os.Open("measurements.txt")
 	if err != nil {
 		panic(err)
 	}
 	go func() {
-		readFile(file, originBytesChan, wg, measureChan)
+		buf := make([]byte, chunkSize)
+		leftover := make([]byte, 0, chunkSize)
+		for {
+			readTotal, err := file.Read(buf)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				panic(err)
+			}
+			buf = buf[:readTotal]
+
+			toSend := make([]byte, readTotal)
+			copy(toSend, buf)
+
+			lastNewLineIndex := bytes.LastIndex(buf, []byte{'\n'})
+
+			toSend = append(leftover, buf[:lastNewLineIndex+1]...)
+			leftover = make([]byte, len(buf[lastNewLineIndex+1:]))
+			copy(leftover, buf[lastNewLineIndex+1:])
+
+			originBytesChan <- toSend
+		}
+		close(originBytesChan)
+
+		// wait for all chunks to be proccessed before closing the result stream
+		wg.Wait()
+		close(measureChan)
 	}()
 
 	// 汇总最终结果
@@ -104,19 +132,19 @@ func main() {
 	fmt.Println("spend time: " + strconv.FormatInt(time.Now().UnixMilli()-start, 10) + " ms")
 }
 
-func process(originBytes []byte, measureChan chan map[string]*measurement) {
+func process(readBytes []byte, dataChan chan map[string]*measurement) {
 	m := make(map[string]*measurement)
 	start := 0
 	var city string
 
-	for idx, v := range originBytes {
+	for idx, v := range readBytes {
 		if v == byte(';') {
-			city = string(originBytes[start:idx])
+			city = string(readBytes[start:idx])
 			start = idx + 1
 		}
 		if v == byte('\n') {
 			if city != "" {
-				measure, _ := strconv.ParseFloat(string(originBytes[start:idx]), 64)
+				measure, _ := strconv.ParseFloat(string(readBytes[start:idx]), 64)
 				if exist, ok := m[city]; !ok {
 					m[city] = &measurement{
 						min: measure,
@@ -139,7 +167,7 @@ func process(originBytes []byte, measureChan chan map[string]*measurement) {
 		}
 	}
 
-	measureChan <- m
+	dataChan <- m
 }
 
 // startProfileHandler 启动 CPU profiling
@@ -156,37 +184,4 @@ func startProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte("Memory profiling completed, profile saved as mem.prof"))
-}
-
-func readFile(file *os.File, bytesChan chan []byte, wg sync.WaitGroup, dataChan chan map[string]*measurement) {
-	chunkSize := 64 * 1024 * 1024
-	buf := make([]byte, chunkSize)
-	leftover := make([]byte, 0, chunkSize)
-	for {
-		readTotal, err := file.Read(buf)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			panic(err)
-		}
-		buf = buf[:readTotal]
-
-		toSend := make([]byte, readTotal)
-		copy(toSend, buf)
-
-		lastNewLineIndex := bytes.LastIndex(buf, []byte{'\n'})
-
-		toSend = append(leftover, buf[:lastNewLineIndex+1]...)
-		leftover = make([]byte, len(buf[lastNewLineIndex+1:]))
-		copy(leftover, buf[lastNewLineIndex+1:])
-
-		bytesChan <- toSend
-
-	}
-	close(bytesChan)
-
-	// wait for all chunks to be proccessed before closing the result stream
-	wg.Wait()
-	close(dataChan)
 }
