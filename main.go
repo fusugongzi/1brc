@@ -38,7 +38,7 @@ func main() {
 
 	start := time.Now().UnixMilli()
 
-	originBytesChan := make(chan []byte, 15)
+	originBytesChan := make(chan []byte, 30)
 
 	// 使用协程处理数据
 	wg := sync.WaitGroup{}
@@ -53,36 +53,26 @@ func main() {
 		}()
 	}
 
+	fileSize, fileMiddle := findFileMiddle()
+
 	// 读取文件，写入到bytesChan
-	chunkSize := 64 * 1024 * 1024
-	file, err := os.Open("measurements.txt")
-	if err != nil {
-		panic(err)
-	}
+	var chunkSize int64 = 64 * 1024 * 1024
+
+	fileReadWg := sync.WaitGroup{}
+	fileReadWg.Add(2)
+	go func(offset, size int64) {
+		defer fileReadWg.Done()
+		readFile(offset, size, chunkSize, originBytesChan)
+	}(0, fileMiddle)
+
+	go func(offset, size int64) {
+		defer fileReadWg.Done()
+		readFile(offset, size, chunkSize, originBytesChan)
+	}(fileMiddle, fileSize-fileMiddle)
+
 	go func() {
-		buf := make([]byte, chunkSize)
-		leftover := make([]byte, 0, chunkSize)
-		for {
-			readTotal, err := file.Read(buf)
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					break
-				}
-				panic(err)
-			}
-			buf = buf[:readTotal]
+		fileReadWg.Wait()
 
-			toSend := make([]byte, readTotal)
-			copy(toSend, buf)
-
-			lastNewLineIndex := bytes.LastIndex(buf, []byte{'\n'})
-
-			toSend = append(leftover, buf[:lastNewLineIndex+1]...)
-			leftover = make([]byte, len(buf[lastNewLineIndex+1:]))
-			copy(leftover, buf[lastNewLineIndex+1:])
-
-			originBytesChan <- toSend
-		}
 		close(originBytesChan)
 
 		// wait for all chunks to be proccessed before closing the result stream
@@ -184,4 +174,93 @@ func startProfileHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte("Memory profiling completed, profile saved as mem.prof"))
+}
+
+func findFileMiddle() (int64, int64) {
+	file, err := os.Open("measurements.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+	fileInfo, err := file.Stat()
+	if err != nil {
+		panic(err)
+	}
+	size := fileInfo.Size()
+	middle := size / 2
+	_, err = file.Seek(middle, 0)
+	if err != nil {
+		panic(err)
+	}
+	buffer := make([]byte, 100)
+	for {
+		readBytesCnt, err := file.Read(buffer)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			panic(err)
+		}
+		if readBytesCnt == 0 {
+			break
+		}
+		for _, v := range buffer {
+			if v == byte('\n') {
+				return size, middle
+			} else {
+				middle = middle + 1
+			}
+		}
+	}
+	return size, middle
+}
+
+func readFile(offset, size, chunkSize int64, bytesChan chan []byte) {
+	var readSpendTime int64 = 0
+	defer func() {
+		fmt.Println("read file spend time" + strconv.FormatInt(readSpendTime, 10))
+	}()
+	file, err := os.Open("measurements.txt")
+	if err != nil {
+		panic(err)
+	}
+	_, err = file.Seek(offset, 0)
+	if err != nil {
+		panic(err)
+	}
+	buf := make([]byte, chunkSize)
+	leftover := make([]byte, 0, chunkSize)
+	var readTotal int64 = 0
+	for {
+		readStart := time.Now().UnixMilli()
+		singleRead, err := file.Read(buf)
+		readSpendTime = readSpendTime + (time.Now().UnixMilli() - readStart)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			panic(err)
+		}
+		buf = buf[:singleRead]
+		readTotal = readTotal + int64(singleRead)
+		if readTotal > size {
+			idx := int64(singleRead) - (readTotal - size)
+			buf = buf[:idx]
+		}
+
+		toSend := make([]byte, singleRead)
+		copy(toSend, buf)
+
+		lastNewLineIndex := bytes.LastIndex(buf, []byte{'\n'})
+
+		toSend = append(leftover, buf[:lastNewLineIndex+1]...)
+		leftover = make([]byte, len(buf[lastNewLineIndex+1:]))
+		copy(leftover, buf[lastNewLineIndex+1:])
+
+		bytesChan <- toSend
+
+		if readTotal >= size {
+			break
+		}
+	}
 }
