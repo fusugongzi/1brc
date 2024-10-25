@@ -7,12 +7,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"reflect"
 	"runtime"
 	"runtime/pprof"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 type measurement struct {
@@ -131,10 +133,10 @@ func process(readBytes []byte, dataChan chan map[string]*measurement) {
 
 	for idx, v := range readBytes {
 		if v == byte(';') {
-			city = string(readBytes[start:idx])
+			city = unsafeString(unsafe.Pointer(&readBytes[start]), start, idx)
 			start = idx + 1
 		}
-		if v == byte('\n') {
+		if v == byte('\n') || idx == len(readBytes)-1 {
 			if city != "" {
 				measure, _ := strconv.ParseFloat(string(readBytes[start:idx]), 64)
 				if exist, ok := m[city]; !ok {
@@ -208,13 +210,13 @@ func findFileMiddle() (int64, int64) {
 		}
 		for _, v := range buffer {
 			if v == byte('\n') {
-				return size, middle
+				return size, middle + 1
 			} else {
 				middle = middle + 1
 			}
 		}
 	}
-	return size, middle
+	return size, middle + 1
 }
 
 func readFile(offset, size, chunkSize int64, bytesChan chan []byte) {
@@ -259,10 +261,28 @@ func readFile(offset, size, chunkSize int64, bytesChan chan []byte) {
 		leftover = make([]byte, len(buf[lastNewLineIndex+1:]))
 		copy(leftover, buf[lastNewLineIndex+1:])
 
-		bytesChan <- toSend
-
 		if readTotal >= size {
+			toSend = append(toSend, leftover...)
+			bytesChan <- toSend
 			break
+		} else {
+			bytesChan <- toSend
 		}
 	}
+}
+
+func unsafeString(ptr unsafe.Pointer, i, j int) string {
+	// 计算字符串的长度
+	length := j - i
+
+	// 构造字符串头，使用偏移后的指针和长度
+	stringHeader := reflect.StringHeader{
+		Data: uintptr(ptr),
+		Len:  length,
+	}
+
+	// 将字符串头转换为字符串
+	s := *(*string)(unsafe.Pointer(&stringHeader))
+
+	return s
 }
