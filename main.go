@@ -18,11 +18,11 @@ import (
 )
 
 type measurement struct {
-	max float64
-	min float64
-	sum float64
+	max int64
+	min int64
+	sum int64
 	cnt int64
-	avg float64
+	avg int64
 }
 
 type computedResult struct {
@@ -111,9 +111,9 @@ func main() {
 	for k, v := range result {
 		computedResults = append(computedResults, &computedResult{
 			name: k,
-			max:  v.max,
-			min:  v.min,
-			avg:  float64(v.sum) / float64(v.cnt),
+			max:  float64(v.max) / float64(10),
+			min:  float64(v.min) / float64(10),
+			avg:  float64(v.sum) / float64(10) / float64(v.cnt),
 		})
 	}
 	sort.SliceStable(computedResults, func(i, j int) bool {
@@ -130,6 +130,8 @@ func process(readBytes []byte, dataChan chan map[string]*measurement) {
 	m := make(map[string]*measurement)
 	start := 0
 	var city string
+	var sign bool
+	var processDom bool
 
 	for idx, v := range readBytes {
 		if v == byte(';') {
@@ -138,7 +140,25 @@ func process(readBytes []byte, dataChan chan map[string]*measurement) {
 		}
 		if v == byte('\n') || idx == len(readBytes)-1 {
 			if city != "" {
-				measure, _ := strconv.ParseFloat(string(readBytes[start:idx]), 64)
+				sign = true
+				processDom = false
+
+				var measure int64 = 0
+				for i := start; i < idx; i++ {
+					if readBytes[i] == '-' {
+						sign = false
+					} else if readBytes[i] == '.' {
+						processDom = true
+					} else if !processDom {
+						measure = measure*10 + int64(readBytes[i]-'0')*10
+					} else {
+						measure = measure + int64(readBytes[i]-'0')
+					}
+				}
+				if !sign {
+					measure = 0 - measure
+				}
+
 				if exist, ok := m[city]; !ok {
 					m[city] = &measurement{
 						min: measure,
