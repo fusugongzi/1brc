@@ -46,9 +46,11 @@ func main() {
 	measureChan := make(chan map[string]*measurement, 10)
 	for i := 0; i < runtime.NumCPU()-1; i++ {
 		go func() {
+			processStart := time.Now().UnixMilli()
 			for readBytes := range originBytesChan {
 				process(readBytes, measureChan)
 			}
+			fmt.Println("process spend time " + strconv.FormatInt((time.Now().UnixMilli()-processStart), 10))
 			wg.Done()
 		}()
 	}
